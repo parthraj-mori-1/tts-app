@@ -66,7 +66,7 @@ export default function ChatApp() {
 
   const sendMessage = () => {
     if (input.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ message: input }));
+      wsRef.current.send(JSON.stringify({action: "sendMessage", message: input }));
       setMessages((prev) => [...prev, { role: "user", text: input }]);
       setInput("");
     }
