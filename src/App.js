@@ -8,7 +8,7 @@ function App() {
   const textBufferRef = useRef(""); // holds current streaming text
 
   useEffect(() => {
-    wsRef.current = new WebSocket("wss://YOUR_API_GATEWAY_URL");
+    wsRef.current = new WebSocket("wss://r1iwk0c5l6.execute-api.ap-south-1.amazonaws.com/dev/");
     wsRef.current.binaryType = "arraybuffer";
 
     wsRef.current.onopen = () => {
