@@ -1,102 +1,106 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
-export default function ChatApp() {
+function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
-  const sourceRef = useRef(null);
+  const textBufferRef = useRef(""); // holds current streaming text
 
   useEffect(() => {
-    // Connect WebSocket
-    const ws = new WebSocket("wss://r1iwk0c5l6.execute-api.ap-south-1.amazonaws.com/dev");
+    wsRef.current = new WebSocket("wss://YOUR_API_GATEWAY_URL");
+    wsRef.current.binaryType = "arraybuffer";
 
-    ws.binaryType = "arraybuffer"; // important for audio
-    ws.onopen = () => console.log("✅ WebSocket connected");
-    ws.onclose = () => console.log("❌ WebSocket disconnected");
+    wsRef.current.onopen = () => {
+      console.log("Connected to WebSocket");
+    };
 
-    ws.onmessage = (event) => {
+    wsRef.current.onmessage = (event) => {
       if (typeof event.data === "string") {
-        // text message
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === "text") {
-            setMessages((prev) => [...prev, { role: "assistant", text: data.text }]);
+          const msg = JSON.parse(event.data);
+          if (msg.type === "text") {
+            // append stream chunks into one buffer
+            textBufferRef.current += msg.data;
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                text: textBufferRef.current,
+              };
+              return updated;
+            });
+          } else if (msg.type === "done") {
+            // reset buffer after stream ends
+            textBufferRef.current = "";
           }
-        } catch (err) {
-          console.error("Error parsing:", err);
+        } catch (e) {
+          console.error("Error parsing JSON", e);
         }
       } else {
-        // binary PCM audio
+        // Binary audio
         playPCM(event.data);
       }
     };
 
-    wsRef.current = ws;
-
-    return () => ws.close();
+    return () => {
+      wsRef.current.close();
+    };
   }, []);
+
+  const sendMessage = () => {
+    if (!input.trim()) return;
+    // add placeholder message for streaming updates
+    setMessages((prev) => [...prev, { text: "" }]);
+    wsRef.current.send(
+      JSON.stringify({ action: "sendMessage", message: input })
+    );
+    setInput("");
+  };
 
   const playPCM = (arrayBuffer) => {
     if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000, // must match Polly output
-      });
+      audioCtxRef.current = new (window.AudioContext ||
+        window.webkitAudioContext)();
     }
-
     const audioCtx = audioCtxRef.current;
 
-    // Convert PCM Int16 -> Float32 for Web Audio
-    const buffer = new Int16Array(arrayBuffer);
-    const float32 = new Float32Array(buffer.length);
-    for (let i = 0; i < buffer.length; i++) {
-      float32[i] = buffer[i] / 32768;
-    }
-
-    const audioBuffer = audioCtx.createBuffer(1, float32.length, 16000);
-    audioBuffer.copyToChannel(float32, 0);
-
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-    source.start();
-
-    sourceRef.current = source;
-  };
-
-  const sendMessage = () => {
-    if (input.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ message: input }));
-      setMessages((prev) => [...prev, { role: "user", text: input }]);
-      setInput("");
-    }
+    audioCtx.decodeAudioData(
+      arrayBuffer.slice(0),
+      (buffer) => {
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+      },
+      (err) => console.error("decodeAudioData error", err)
+    );
   };
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">💬 Chat with AI (Text + Audio)</h1>
-      <div className="border rounded-lg p-4 h-80 overflow-y-auto bg-gray-50">
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`my-2 ${msg.role === "user" ? "text-blue-600" : "text-green-600"}`}>
-            <b>{msg.role}:</b> {msg.text}
-          </div>
+    <div style={{ padding: "20px" }}>
+      <h2>Realtime Stream Chat</h2>
+      <div
+        style={{
+          border: "1px solid #ccc",
+          padding: "10px",
+          minHeight: "200px",
+          marginBottom: "10px",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {messages.map((m, idx) => (
+          <div key={idx}>{m.text}</div>
         ))}
       </div>
-
-      <div className="flex mt-4">
-        <input
-          className="flex-1 border rounded-l-lg p-2"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your message..."
-        />
-        <button
-          onClick={sendMessage}
-          className="bg-blue-500 text-white px-4 rounded-r-lg"
-        >
-          Send
-        </button>
-      </div>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        style={{ width: "70%" }}
+      />
+      <button onClick={sendMessage}>Send</button>
     </div>
   );
 }
+
+export default App;
